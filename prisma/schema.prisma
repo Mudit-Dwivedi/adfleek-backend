@@ -1,0 +1,331 @@
+// ───────────────────────────────────────────────
+// Prisma setup
+// ───────────────────────────────────────────────
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+ 
+}
+
+// ───────────────────────────────────────────────
+// Identity, Orgs & RBAC
+// ───────────────────────────────────────────────
+
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  firstName         String?
+  lastName          String?
+  phone             String?   @db.Text
+  dob               DateTime?
+  photoUrl          String?
+  isEmailVerified   Boolean   @default(false)
+  passwordHash      String?
+  passwordUpdatedAt DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  // Relations
+  authIdentities      AuthIdentity[]
+  organizationMembers OrganizationMember[]
+  auditLogs           AuditLog[]
+  UserRole            UserRole[] 
+
+
+}
+
+model AuthIdentity {
+  id           String       @id @default(uuid())
+  provider     AuthProvider
+  providerUid  String
+  passwordHash String?
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([provider, providerUid])
+   
+}
+
+enum AuthProvider {
+  email_password
+  google
+  microsoft
+  apple
+  github
+   
+}
+
+model EmailOtp {
+  id        String     @id @default(uuid())
+  email     String
+  otpHash   String
+  purpose   OtpPurpose
+  expiresAt DateTime
+  createdAt DateTime   @default(now())
+   
+}
+
+enum OtpPurpose {
+  verify_email
+  password_reset
+  login_2fa
+   
+}
+
+model Organization {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members       OrganizationMember[]
+  subscriptions Subscription[]
+  invoices      Invoice[]
+  transactions  Transaction[]
+  brands        CoreBrand[]
+  Role          Role[]
+   
+}
+
+model OrganizationMember {
+  id        String   @id @default(uuid())
+  role      String
+  userId    String
+  orgId     String
+  createdAt DateTime @default(now())
+
+  // Relations
+  user User         @relation(fields: [userId], references: [id])
+  org  Organization @relation(fields: [orgId], references: [id])
+   
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String
+  action    String
+  createdAt DateTime @default(now())
+
+  // Relations
+  actor User @relation(fields: [actorId], references: [id])
+   
+}
+
+model Role {
+  id        String   @id @default(uuid())
+  orgId     String
+  name      String
+  createdAt DateTime @default(now())
+
+  // Relations
+  org             Organization     @relation(fields: [orgId], references: [id])
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+   
+}
+
+model Permission {
+  id             String           @id @default(uuid())
+  key            String           @unique
+  RolePermission RolePermission[]
+   
+}
+
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id])
+  permission Permission @relation(fields: [permissionId], references: [id])
+
+  @@id([roleId, permissionId])
+   
+}
+
+model UserRole {
+  id     String @id @default(uuid())
+  userId String
+  roleId String
+
+  user User @relation(fields: [userId], references: [id])
+  role Role @relation(fields: [roleId], references: [id])
+   
+}
+
+// ───────────────────────────────────────────────
+// Billing: Products, Plans, Subscriptions
+// ───────────────────────────────────────────────
+
+model Product {
+  id          String   @id
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  plans Plan[]
+   
+}
+
+model Plan {
+  id           String       @id
+  productId    String
+  name         String
+  currency     String
+  priceCents   BigInt
+  interval     PlanInterval
+  featuresJson Json?
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  // Relations
+  product       Product        @relation(fields: [productId], references: [id])
+  subscriptions Subscription[]
+   
+}
+
+enum PlanInterval {
+  monthly
+  yearly
+   
+}
+
+model Subscription {
+  id                     String               @id @default(uuid())
+  orgId                  String
+  planId                 String
+  provider               SubscriptionProvider
+  providerSubscriptionId String
+  status                 String
+  startAt                DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAt               DateTime?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+
+  // Relations
+  org      Organization @relation(fields: [orgId], references: [id])
+  plan     Plan         @relation(fields: [planId], references: [id])
+  invoices Invoice[]
+   
+}
+
+enum SubscriptionProvider {
+  razorpay
+  stripe
+  paypal
+   
+}
+
+model Invoice {
+  id                String    @id @default(uuid())
+  orgId             String
+  subscriptionId    String
+  taxableAmount     BigInt
+  sgstPercent       Float?
+  cgstPercent       Float?
+  igstPercent       Float?
+  totalAmount       BigInt
+  currency          String
+  gstNo             String?
+  providerInvoiceId String?
+  status            String
+  issuedAt          DateTime?
+  dueAt             DateTime?
+  paidAt            DateTime?
+  createdAt         DateTime  @default(now())
+
+  // Relations
+  org          Organization  @relation(fields: [orgId], references: [id])
+  subscription Subscription  @relation(fields: [subscriptionId], references: [id])
+  transactions Transaction[]
+   
+}
+
+model Transaction {
+  id                String          @id @default(uuid())
+  orgId             String
+  invoiceId         String
+  provider          PaymentProvider
+  providerPaymentId String
+  status            PaymentStatus
+  amountCents       BigInt
+  currency          String
+  paymentMethod     PaymentMethod?
+  receiptUrl        String?
+  createdAt         DateTime        @default(now())
+
+  // Relations
+  org     Organization @relation(fields: [orgId], references: [id])
+  invoice Invoice      @relation(fields: [invoiceId], references: [id])
+   
+}
+
+enum PaymentProvider {
+  razorpay
+  stripe
+  paypal
+   
+}
+
+enum PaymentStatus {
+  succeeded
+  failed
+  refunded
+   
+}
+
+enum PaymentMethod {
+  upi
+  card
+  netbanking
+  wallet
+   
+}
+
+// ───────────────────────────────────────────────
+// Brands
+// ───────────────────────────────────────────────
+
+model CoreBrand {
+  id             String         @id @default(uuid())
+  orgId          String
+  name           String
+  slug           String
+  website        String         @default("")
+  facebookLink   String         @default("")
+  instagramLink  String         @default("")
+  twitterLink    String         @default("")
+  youtubeLink    String         @default("")
+  linkedinLink   String         @default("")
+  whatsappNum    String         @default("")
+  otherLinks     String         @default("")
+  logoUrl        String         @default("")
+  metadataId     String?
+  templateStatus TemplateStatus @default(draft)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Relations
+  org Organization @relation(fields: [orgId], references: [id])
+
+  @@unique([orgId, slug])
+   
+}
+
+enum TemplateStatus {
+  draft
+  in_progress
+  ready
+   
+}
