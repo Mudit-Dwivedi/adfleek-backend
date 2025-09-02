@@ -9,8 +9,9 @@ const register = async (req, res) => {
       password,
       confirmPassword,
       contactNumber,
-      otp,
-    } = req.body;
+      accountType,
+      otp
+      } = req.body;
     console.log(firstName, lastName, email, password);
 
     if (
@@ -19,6 +20,8 @@ const register = async (req, res) => {
       !email ||
       !password ||
       !confirmPassword ||
+      !contactNumber ||
+      !accountType ||
       !otp
     ) {
       return res.status(400).json({ message: "All fields are required" });
@@ -31,7 +34,8 @@ const register = async (req, res) => {
       password,
       confirmPassword,
       contactNumber,
-      otp,
+      accountType,
+      otp
     });
     res.status(201).json(result);
   } catch (error) {
@@ -45,7 +49,7 @@ const register = async (req, res) => {
       return res.status(400).json({ error: error.message });
     }
 
-    res.status(500).json({ error: "Something went wrong" });
+    res.status(500).json({ error: "Something went wrong in controller" });
   }
 };
 
@@ -56,14 +60,7 @@ const login = async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ message: "All fields are required" });
     }
-    const user = await user.findOne({ email });
-    if (!user) {
-      // Return 401 Unauthorized status code with error message
-      return res.status(401).json({
-        success: false,
-        message: `User is not Registered with Us Please SignUp to Continue`,
-      });
-    }
+
 
     const result = await authService.login(email, password);
     res.status(200).json(result);
@@ -82,18 +79,13 @@ const login = async (req, res) => {
 const sendOtp = async (req, res) => {
   try {
     const { email } = req.body;
-    const checkUserPresent = await user.findOne({ email });
-
-    if (!checkUserPresent) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-    const otp = await authService.sendOtp(email);
-    res.status(200).json({ message: "OTP sent successfully", otp });
+    const result = await authService.sendOtp(email);
+    res.status(200).json(result);
   } catch (error) {
     console.error(error);
+    if (error.message === "User is Already Registered") {
+      return res.status(401).json({ error: error.message });
+    }
     res.status(500).json({ error: "Something went wrong" });
   }
 };
@@ -106,11 +98,14 @@ const changePassword = async (req, res) => {
       return res.status(400).json({ message: "All fields are required" });
     }
 
+    if (newPassword !== confirmPassword) {
+      return res.status(400).json({ error: "Passwords do not match" });
+    }
+    
     const result = await authService.changePassword(
       email,
       oldPassword,
-      newPassword,
-      confirmPassword
+      newPassword
     );
     res.status(200).json(result);
   } catch (error) {
@@ -125,4 +120,43 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { register, login, sendOtp, changePassword };
+
+const resetPassword = async(req,res)=>{
+  try {
+    const { password, confirmPassword, token} = req.body;
+    const result = await authService.resetPassword( password, confirmPassword, token);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error(error);
+    if (error.message === "All fields are required") {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.message === "Invalid email or password") {
+      return res.status(401).json({ error: error.message });
+    }
+    res.status(500).json({ error: "Something went wrong" });
+  }
+}
+
+const resetPasswordToken =async(req,res)=>{
+  try {
+    const {email} = req.body;
+    const result = await authService.resetPasswordToken(email);
+    res.status(200).json(result);
+  } catch (error) {
+    console.error(error);
+    if (error.message === "All fields are required") {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error.message === "Invalid email or password") {
+      return res.status(401).json({ error: error.message });
+    }
+    res.status(500).json({ error: "Something went wrong" });
+  }
+}
+
+
+
+
+
+module.exports = { register, login, sendOtp, changePassword ,resetPassword ,resetPasswordToken };
