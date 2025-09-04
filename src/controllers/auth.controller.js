@@ -155,8 +155,28 @@ const resetPasswordToken =async(req,res)=>{
   }
 }
 
+const googleLogin = async (req, res) => {
+  try {
+    const { id_token } = req.body;
+    if (! id_token) {
+      return res.status(400).json({ error: "idToken is required" });
+    }
+
+    const result = await authService.googleLogin(id_token);
+
+    res.json({
+      success: true,
+      user: result.user,
+      token: result.token,
+      message: "Google login successful"
+    });
+  } catch (error) {
+    console.error("Google Auth Error:", error);
+    res.status(401).json({ error: error.message || "Google login failed" });
+  }
+}
 
 
 
 
-module.exports = { register, login, sendOtp, changePassword ,resetPassword ,resetPasswordToken };
+module.exports = { register, login, sendOtp, changePassword ,resetPassword ,resetPasswordToken ,googleLogin};

@@ -4,6 +4,8 @@ const { PrismaClient } = require("@prisma/client");
 const otpGenerator = require("otp-generator");
 const mailSender = require("../utils/mailSender");
 const crypto = require("crypto");
+const {OAuth2Client} = require('google-auth-library');
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const prisma = new PrismaClient();
 
@@ -217,23 +219,32 @@ const changePassword = async (email, oldPassword, newPassword) => {
 };
 
 
-const resetPasswordToken=async(email)=>{
+const resetPasswordToken = async (email) => {
   try {
-    const user=await prisma.user.findUnique({
-      where:{email}
-    })
-    if(!user){
+    const user = await prisma.user.findUnique({
+      where: { email }
+    });
+    if (!user) {
       throw new Error('Email not found');
     }
-    const token=crypto.randomBytes(20).toString("hex")
-    const updatedDetails=await prisma.user.update({
-      where:{email},
-      data:{
-        passwordUpdatedAt: new Date()
+    
+    const token = crypto.randomBytes(20).toString("hex");
+    const tokenHash = await bcrypt.hash(token, 10);
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    
+    // Store the token in emailOtp table with purpose 'reset_password'
+    await prisma.emailOtp.create({
+      data: {
+        email,
+        otpHash: tokenHash,
+        purpose: 'password_reset',
+        expiresAt
       }
-    })
-   	const url = `http://localhost:3000/update-password/${token}`;
-    await mailSender(email,"Password Reset",`Your Link for email verification is ${url}. Please click this url to reset your password.`)
+    });
+    
+    const url = `http://localhost:3000/update-password/${token}`;
+    await mailSender(email, "Password Reset", `Your Link for password reset is ${url}. This link will expire in 15 minutes.`);
+    
     return {
       success: true,
       message: 'Email sent successfully, please check your email'
@@ -251,12 +262,32 @@ const resetPassword = async (password, confirmPassword, token) => {
       throw new Error("Password and Confirm Password Does not Match");
     }
     
-    const userDetails = await prisma.user.findFirst({ 
-      where: { email: token }
+    // Find the most recent reset token
+    const tokenRecord = await prisma.emailOtp.findFirst({
+      where: { 
+        purpose: 'password_reset',
+        expiresAt: { gt: new Date() }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    
+    if (!tokenRecord) {
+      throw new Error("Token is Invalid or Expired");
+    }
+    
+    // Verify token hash
+    const isTokenValid = await bcrypt.compare(token, tokenRecord.otpHash);
+    if (!isTokenValid) {
+      throw new Error("Token is Invalid");
+    }
+    
+    // Find user by email from token record
+    const userDetails = await prisma.user.findUnique({
+      where: { email: tokenRecord.email }
     });
     
     if (!userDetails) {
-      throw new Error("Token is Invalid");
+      throw new Error("User not found");
     }
     
     const encryptedPassword = await bcrypt.hash(password, 10);
@@ -266,6 +297,11 @@ const resetPassword = async (password, confirmPassword, token) => {
         passwordHash: encryptedPassword,
         passwordUpdatedAt: new Date()
       },
+    });
+    
+    // Delete the used token
+    await prisma.emailOtp.delete({
+      where: { id: tokenRecord.id }
     });
     
     return {
@@ -278,7 +314,83 @@ const resetPassword = async (password, confirmPassword, token) => {
   }
 };
 
-module.exports = { register, login , sendOtp, changePassword , resetPasswordToken ,resetPassword};
+
+const googleLogin = async (idToken) => {
+  try {
+    const ticket = await client.verifyIdToken({
+      idToken: idToken,
+      // audience: process.env.GOOGLE_CLIENT_ID
+    });
+
+    const payload = ticket.getPayload();
+    console.log("payload", payload);
+    const { sub, email, name, picture } = payload;
+
+    // Check if Google auth identity exists
+    let authIdentity = await prisma.authIdentity.findFirst({
+      where: {
+        provider: "google",
+        providerUid: sub
+      },
+      include: {
+        user: true
+      }
+    });
+
+    let user;
+    if (!authIdentity) {
+      // Check if user already exists with this email
+      const existingUser = await prisma.user.findUnique({
+        where: { email }
+      });
+
+      if (existingUser) {
+        // Link Google account to existing user
+        user = existingUser;
+        authIdentity = await prisma.authIdentity.create({
+          data: {
+            provider: "google",
+            providerUid: sub,
+            userId: user.id
+          }
+        });
+      } else {
+        // Create new user
+        user = await prisma.user.create({
+          data: {
+            email,
+            firstName: name,
+            photoUrl: picture,
+            passwordUpdatedAt: new Date()
+          }
+        });
+        authIdentity = await prisma.authIdentity.create({
+          data: {
+            provider: "google",
+            providerUid: sub,
+            userId: user.id
+          }
+        });
+      }
+    } else {
+      user = authIdentity.user;
+    }
+
+    const token =jwt.sign({id:user.id},process.env.JWT_SECRET,{expiresIn:"24h"});
+
+    return{
+      success:true,
+      user,
+      token,
+      message:"Google login successful"
+    }
+  } catch (error) {
+    console.error("Google log in failed ",error);
+    throw error;
+  }
+}
+
+module.exports = { register, login , sendOtp, changePassword , resetPasswordToken ,resetPassword ,googleLogin};
 
 
 

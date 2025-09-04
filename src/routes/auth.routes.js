@@ -11,5 +11,6 @@ router.post("/reset-password-token", authController.resetPasswordToken)
 
 // Route for resetting user's password after verification
 router.post("/reset-password", authController.resetPassword);
+router.post("/google", authController.googleLogin);
 
 module.exports = router;
