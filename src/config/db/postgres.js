@@ -7,10 +7,10 @@ const db = new PrismaClient(
 )
 db.$connect()
     .then(() => {
-        console.log('Database connected successfully.');
+        console.log('Postgres Database connected successfully.');
     })
     .catch((err) => {
-        console.error('Database connection failed:', err);
+        console.error('Postgres Database connection failed:', err);
     });
 
 module.exports = db
