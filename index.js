@@ -2,15 +2,15 @@ const express = require('express');
 const app = express();
 const postgres = require('./src/config/db/postgres');
 const mongo = require('./src/config/db/mongo');
-
-const router = require('./src/routes/auth.routes');
-const routerChat = require('./src/routes/chat.routes');
 const bodyParser = require('body-parser');
+
+const router = require('./src/routes/index');
+
 
 
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(bodyParser.json()); // for parsing application/json
-app.use(express.json()); // This can be redundant with bodyParser.json()
+app.use(bodyParser.json()); 
+app.use(express.json()); 
 
 const port = process.env.PORT || 3000;
 
@@ -19,8 +19,7 @@ app.get('/', (req, res) => {
 });
 mongo.connect();
 
-app.use('/api/auth', router);
-app.use('/api/chat', routerChat);
+app.use('/api', router);
 
 app.listen(port, () => {
   console.log(`Adfleek Server connected at port ${port}`);
